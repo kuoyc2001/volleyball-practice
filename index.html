@@ -899,6 +899,9 @@ const CATEGORIES = [
 ];
 const POSITION_CLASS = { setter:'pos-setter', outside:'pos-outside', middle:'pos-middle', opposite:'pos-opposite' };
 
+// 建立一個全域的請求佇列，用來讓 API 乖乖排隊
+window.apiSyncQueue = Promise.resolve();
+
 // ---------- Data Sync ----------
 async function fetchFromSheet() {
   const overlay = document.getElementById('loadingOverlay');
@@ -947,7 +950,6 @@ async function fetchFromSheet() {
     updateProgress("雲端連線失敗，載入本機資料", 100);
     window.showToast("雲端連線失敗，已切換為本機暫存模式");
     loadLocalData();
-    setTimeout(() => { if(overlay) overlay.classList.add('hidden'); }, 800);
   }
 }
 
@@ -956,21 +958,20 @@ async function syncToSheet(action, dataObj) {
       saveLocalData(); 
       return;
   }
-  try {
-    // 加上 Content-Type: text/plain 可以避免觸發預檢請求 (OPTIONS)，防止常見的 CORS 錯誤
-    fetch(GOOGLE_SHEETS_API_URL, {
+  
+  // 優先儲存本機
+  saveLocalData();
+
+  // 將請求加入排隊佇列 (Promise Queue)，確保前一個存檔完成，才執行下一個存檔
+  window.apiSyncQueue = window.apiSyncQueue.then(() => {
+    return fetch(GOOGLE_SHEETS_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "text/plain;charset=utf-8",
       },
       body: JSON.stringify({ action: action, data: dataObj })
     }).catch(e => console.warn("背景同步失敗:", e));
-    saveLocalData();
-  } catch(error) {
-    console.warn("同步發生異常:", error);
-    window.showToast("同步失敗，將於下次整理時覆寫");
-    saveLocalData();
-  }
+  });
 }
 
 function loadLocalData() {
@@ -1516,8 +1517,17 @@ function dragNodeEnd(e) {
   
   activeNode = null;
   saveLocalData(); 
-  // 移動球員後也同步更新到雲端，以儲存座標
-  if (player) syncToSheet('savePlayer', player);
+  
+  // 新增：防抖機制 (Debounce)，等待 800 毫秒沒再移動才發送，避免瘋狂存檔
+  if (player) {
+    window.playerSaveTimers = window.playerSaveTimers || {};
+    if (window.playerSaveTimers[player.id]) {
+      clearTimeout(window.playerSaveTimers[player.id]);
+    }
+    window.playerSaveTimers[player.id] = setTimeout(() => {
+      syncToSheet('savePlayer', player);
+    }, 800);
+  }
   
   // 如果剛才沒有發生移動（單純點擊），就開啟編輯視窗！
   if (!isNodeMoved) {
