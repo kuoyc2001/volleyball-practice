@@ -48,6 +48,24 @@
   }
   .num { font-family: 'Teko', sans-serif; }
 
+  /* ---------- Loading Overlay (新增進度條樣式) ---------- */
+  .loading-overlay {
+    position: fixed; inset: 0;
+    background: rgba(246, 249, 252, 0.6); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    z-index: 9999;
+    display: flex; align-items: center; justify-content: center;
+    transition: opacity 0.5s ease, visibility 0.5s ease;
+  }
+  .loading-overlay.hidden { opacity: 0; visibility: hidden; }
+  .loading-modal {
+    background: var(--glass-strong); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    padding: 30px; border-radius: 20px; border: 1px solid var(--glass-border);
+    box-shadow: 0 20px 50px rgba(31,64,104,0.15); width: 80%; max-width: 320px; text-align: center;
+  }
+  .loading-text { font-weight: 700; color: var(--ink); margin-bottom: 16px; font-size: 15px; }
+  .progress-bar { height: 8px; background: rgba(33,40,54,0.1); border-radius: 999px; overflow: hidden; }
+  .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--mint), var(--accent)); transition: width 0.4s ease; }
+
   /* ---------- Header ---------- */
   header.scoreboard {
     background: var(--glass-strong);
@@ -651,6 +669,16 @@
 </head>
 <body>
 
+<!-- 新增：載入進度條遮罩 -->
+<div id="loadingOverlay" class="loading-overlay">
+  <div class="loading-modal">
+    <div class="loading-text" id="loadingText">準備連線...</div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+  </div>
+</div>
+
 <header class="scoreboard">
   <div class="header-row">
     <div>
@@ -873,16 +901,31 @@ const POSITION_CLASS = { setter:'pos-setter', outside:'pos-outside', middle:'pos
 
 // ---------- Data Sync ----------
 async function fetchFromSheet() {
+  const overlay = document.getElementById('loadingOverlay');
+  const textEl = document.getElementById('loadingText');
+  const fillEl = document.getElementById('progressFill');
+
+  const updateProgress = (msg, percent) => {
+    if(textEl) textEl.textContent = msg;
+    if(fillEl) fillEl.style.width = percent + '%';
+  };
+
+  updateProgress("準備連線...", 20);
+
   if (GOOGLE_SHEETS_API_URL === "YOUR_GOOGLE_APPS_SCRIPT_URL_HERE") {
+      updateProgress("單機測試模式", 100);
       window.showToast("目前為單機測試模式（尚未設定 API）");
       loadLocalData();
+      setTimeout(() => { if(overlay) overlay.classList.add('hidden'); }, 600);
       return;
   }
   
-  window.showToast("載入雲端資料中...");
+  updateProgress("載入雲端資料中...", 60);
   try {
     const response = await fetch(GOOGLE_SHEETS_API_URL);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    
+    updateProgress("處理資料...", 80);
     const data = await response.json();
     window.ideaCards = data.ideaCards || [];
     window.practices = data.practices || [];
@@ -896,11 +939,15 @@ async function fetchFromSheet() {
     renderIdeaBoard();
     renderPractices();
     window.renderRoster();
-    window.showToast("資料同步完成");
+    
+    updateProgress("載入完成！", 100);
+    setTimeout(() => { if(overlay) overlay.classList.add('hidden'); }, 600);
   } catch (error) {
     console.warn("無法連線至雲端:", error);
+    updateProgress("雲端連線失敗，載入本機資料", 100);
     window.showToast("雲端連線失敗，已切換為本機暫存模式");
     loadLocalData();
+    setTimeout(() => { if(overlay) overlay.classList.add('hidden'); }, 800);
   }
 }
 
@@ -1348,7 +1395,7 @@ window.renderRoster = function() {
       if (el) el.innerHTML = '';
   });
 
-  document.getElementById('rosterCount').textContent = window.roster.length ? `共 ${window.roster.length} 位球員` : '拖曳圖示安排站位，連點兩下可編輯球員';
+  document.getElementById('rosterCount').textContent = window.roster.length ? `共 ${window.roster.length} 位球員` : '拖曳圖示安排站位，單點可編輯球員';
 
   // 按背號排序
   const sortedRoster = [...window.roster].sort((a, b) => (parseInt(a.number)||999) - (parseInt(b.number)||999));
